@@ -10,6 +10,7 @@ GUILD = os.getenv('DISCORD_GUILD')
 authToken = os.getenv('API_KEY')
 
 client = discord.Client(intents=discord.Intents.default())
+client.run(TOKEN)
 
 if not authToken:
     raise ValueError('API_KEY environment variable not set')
@@ -195,5 +196,3 @@ async def on_ready():
         f'{client.user} has connected to the following guild:\n'
         f'{guild.name}(id: {guild.id})'
     )
-
-client.run(TOKEN)
