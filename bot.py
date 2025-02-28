@@ -10,13 +10,12 @@ GUILD = os.getenv('DISCORD_GUILD')
 authToken = os.getenv('API_KEY')
 
 client = discord.Client(intents=discord.Intents.default())
-client.run(TOKEN)
 
 if not authToken:
     raise ValueError('API_KEY environment variable not set')
 apiVersion = 'alpha'
 
-phaseId = 1899514
+phaseId = 1903460
 perPage = 70
 url = "https://api.start.gg/gql/{apiVersion}".format(apiVersion=apiVersion)
 
@@ -60,6 +59,7 @@ query PhaseSeeds($phaseId: ID!, $page: Int!, $perPage: Int!) {
       nodes {
         id
         round
+        completedAt
         slots {
           id
           entrant {
@@ -88,12 +88,13 @@ variables = {
   "perPage": perPage
 }
 
-response = requests.post(url, headers=headers, json={"query": query, "variables": variables})
-
-if response.status_code == 200:
-  resData = response.json()
-else:
-  print(f"Error {response.status_code}: {response.text}")
+def fetch_data():
+    response = requests.post(url, headers=headers, json={"query": query, "variables": variables})
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error {response.status_code}: {response.text}")
+        return None
 
 def calcSPR(seedNum):
     if seedNum in sprDict:
@@ -101,28 +102,54 @@ def calcSPR(seedNum):
     else:
         return seedNum
 
-if 'errors' in resData:
-    print('Error:')
-    print(resData['errors'])
-elif not resData['data']['phase']:
-    print('Phase not found')
-else:
-    seedings = resData['data']['phase']['seeds']['nodes']
-    sets = resData['data']['phase']['sets']['nodes']
+def isWinnersSide(roundNum):
+    if roundNum > 0:
+        return "\U0001F535 W: "
+    else:
+        return "\U0001F534 L: "
+    
+def calcUF(winnerSeed, loserSeed):
+  winnerSpr = calcSPR(winnerSeed)
+  loserSpr = calcSPR(loserSeed)
+
+  UF = winnerSpr - loserSpr
+  return(UF)
+
+def getUpsets():
+    data = fetch_data()
+    if not data:
+        return None
+
+    combinedData = {}
+    
+    if 'errors' in data:
+        print('Error:')
+        print(data['errors'])
+        return None
+    elif not data['data']['phase']:
+        print('Phase not found')
+        return None
+
+    seedings = data['data']['phase']['seeds']['nodes']
+    sets = data['data']['phase']['sets']['nodes']
     
     seedsDict = {seed['entrant']['id']: seed for seed in seedings}
 
-    combinedData = {}
+    # Repopulate combinedData with sorted sets based on 'completedAt'
     for set in sets:
         setId = set['id']
         roundNum = set['round']
+        completedAt = set.get('completedAt', 0)  # default to 0 if missing
+
         combinedData[setId] = {
             'setId': setId,
             'round': roundNum,
+            'completedAt': completedAt,
             'slots': [],
             'winner': None,
             'loser': None
         }
+
         setWinner = None
         setLoser = None
         for slot in set['slots']:
@@ -143,24 +170,14 @@ else:
                     setWinner = slotData
                 elif slot['standing'] and slot['standing']['placement'] == 2:
                     setLoser = slotData
+
         combinedData[setId]['winner'] = setWinner
         combinedData[setId]['loser'] = setLoser
 
-def isWinnersSide(roundNum):
-    if roundNum > 0:
-        return "\U0001F535 W: "
-    else:
-        return "\U0001F534 L: "
+    # Sort the sets by 'completedAt' in descending order
+    sorted_sets = sorted(combinedData.items(), key=lambda x: x[1].get('completedAt', 0)or 0, reverse=True)
     
-def calcUF(winnerSeed, loserSeed):
-  winnerSpr = calcSPR(winnerSeed)
-  loserSpr = calcSPR(loserSeed)
-
-  UF = winnerSpr - loserSpr
-  return(UF)
-
-def getUpsets():
-    for setId, setInfo in combinedData.items():
+    for setId, setInfo in sorted_sets:
         if setInfo['winner']:
             winnerSeed = setInfo['winner']['seedNum']
             for slot in setInfo['slots']:
@@ -169,8 +186,9 @@ def getUpsets():
                     UF = calcUF(winnerSeed, loserSeed)
                     isWinners = isWinnersSide(setInfo['round'])
                     if winnerSeed > loserSeed:
-                        message = (f"{isWinners}{setInfo['winner']['entrantName']} (Seed {winnerSeed}) {setInfo['winner']['stats']['score']['value']} - {setInfo['loser']['stats']['score']['value']} {setInfo['loser']['entrantName']} (Seed {loserSeed}). Upset Facor: {UF}")
+                        message = (f"{isWinners}{setInfo['winner']['entrantName']} (Seed {winnerSeed}) {setInfo['winner']['stats']['score']['value']} - {setInfo['loser']['stats']['score']['value']} {setInfo['loser']['entrantName']} (Seed {loserSeed}). Upset Factor: {UF}")
                         return message
+    return None
 
 lastUpset = None
 async def monitorUpsets(channel):
@@ -196,3 +214,4 @@ async def on_ready():
         f'{client.user} has connected to the following guild:\n'
         f'{guild.name}(id: {guild.id})'
     )
+client.run(TOKEN)
