@@ -7,20 +7,22 @@ import asyncio
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD = os.getenv('DISCORD_GUILD')
-authToken = os.getenv('API_KEY')
+CHANNEL = int(os.getenv('DISCORD_CHANNEL')) 
+AUTHTOKEN  = os.getenv('API_KEY')
+EVENT = os.getenv('EVENT_ID')
 
 client = discord.Client(intents=discord.Intents.default())
 
-if not authToken:
+if not AUTHTOKEN:
     raise ValueError('API_KEY environment variable not set')
 apiVersion = 'alpha'
 
-phaseId = 1903460
-perPage = 70
+eventId = EVENT
+perPage = 50
 url = "https://api.start.gg/gql/{apiVersion}".format(apiVersion=apiVersion)
 
 headers = {
-    "Authorization": f"Bearer {authToken}",
+    "Authorization": f"Bearer {AUTHTOKEN}",
     "Content-Type": "application/json"
 }
 
@@ -28,11 +30,75 @@ sprDict = {
   1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 4, 7: 5, 8: 5, 9: 6, 10: 6,
   11: 6, 12: 6, 13: 7, 14: 7, 15: 7, 16: 7, 17: 8, 18: 8, 19: 8,
   20: 8, 21: 8, 22: 8, 23: 8, 24: 8, 25: 9, 26: 9, 27: 9, 28: 9,
-  29: 9, 30: 9, 31: 9, 32: 9
+  29: 9, 30: 9, 31: 9, 32: 9, 33: 10, 34: 10, 35: 10, 36: 10, 37: 10,
+  38: 10, 39: 10, 40: 10, 41: 10, 42: 10, 43: 10, 44: 10, 45: 10, 46: 10,
+  47: 10, 48: 10, 49: 11, 50: 11, 51: 11, 52: 11, 53: 11, 54: 11, 55: 11,
+  56: 11, 57: 11, 58: 11, 59: 11, 60: 11, 61: 11, 62: 11, 63: 11, 64: 11,
 }
 
-query ='''
-query PhaseSeeds($phaseId: ID!, $page: Int!, $perPage: Int!) {
+queryEvent = '''
+query Event($eventId: ID!) {
+  event(id: $eventId) {
+    id
+    name
+    phases {
+      id
+      name
+      phaseOrder
+    }
+  }
+}
+'''
+
+variablesEvent = {"eventId": eventId}
+response = requests.post(url, headers=headers, json={"query": queryEvent, "variables": variablesEvent})
+
+phaseIds = []
+if response.status_code == 200:
+    eventData = response.json()
+    if 'errors' in eventData:
+        print('Error:')
+        print(eventData['errors'])
+    elif not eventData['data']['event']:
+        print('Event not found')
+    else:
+        event = eventData['data']['event']
+        phase = eventData['data']['event']['phases']
+        phaseIds = [x['id'] for x in sorted(phase, key=lambda x: x['phaseOrder'])]
+        initialPhase = min(phase, key=lambda x: x['phaseOrder'], default=None)
+        initphaseId = initialPhase['id'] if initialPhase else None
+else:
+    print(f"Error {response.status_code}: {response.text}")
+
+queryInitPhase = '''
+query Phase($phaseId: ID!, $page: Int!, $perPage: Int!) {
+  phase(id: $phaseId) {
+    id
+    seeds(query: {page: $page, perPage: $perPage}) {
+      pageInfo {
+        total
+        totalPages
+      }
+      nodes {
+        id
+        seedNum
+        entrant {
+          id
+          participants {
+            id
+            gamerTag
+          }
+        }
+      }
+    }
+  }
+}
+'''
+
+variablesInitPhase = {"phaseId": initphaseId, "page": 1, "perPage": perPage}
+
+queryPhases ='''
+query Phase($phaseId: ID!, $page: Int!, $perPage: Int!) {
   phase(id: $phaseId) {
     id
     seeds(query: {page: $page, perPage: $perPage}) {
@@ -82,19 +148,38 @@ query PhaseSeeds($phaseId: ID!, $page: Int!, $perPage: Int!) {
 }
 '''
 
-variables = {
-  "phaseId": phaseId,
-  "page": 1,
-  "perPage": perPage
-}
+def fetchInitPhaseData():
+    initPhaseData = requests.post(url, headers=headers, json={"query": queryInitPhase, "variables": variablesInitPhase})
+    if initPhaseData.status_code == 200:
+        initPhaseData = initPhaseData.json()
+        if 'errors' in initPhaseData:
+            print('Error:')
+            print(initPhaseData['errors'])
+            return None
+        elif not initPhaseData['data']['phase']:
+            print('Phase not found')
+            return None
+        return initPhaseData
 
-def fetch_data():
-    response = requests.post(url, headers=headers, json={"query": query, "variables": variables})
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"Error {response.status_code}: {response.text}")
-        return None
+def fetchData():
+    allSets = []
+    for phaseId in phaseIds:
+        variablesPhases = {"phaseId": phaseId, "page": 1, "perPage": perPage}
+        response = requests.post(url, headers=headers, json={"query": queryPhases, "variables": variablesPhases})
+        if response.status_code == 200:
+            phaseData = response.json()
+            if 'errors' in phaseData:
+                print('Error:')
+                print(phaseData['errors'])
+                return None
+            elif not phaseData['data']['phase']:
+                print('Phase not found')
+                return None
+            allSets.extend(phaseData['data']['phase']['sets']['nodes'])
+        else:
+            print(f"Error {response.status_code}: {response.text}")
+    return {"sets": allSets} if allSets else None
+            
 
 def calcSPR(seedNum):
     if seedNum in sprDict:
@@ -116,30 +201,31 @@ def calcUF(winnerSeed, loserSeed):
   return(UF)
 
 def getUpsets():
-    data = fetch_data()
+    seedData = fetchInitPhaseData()
+    data = fetchData()
+    if not seedData:
+        return None
     if not data:
         return None
 
     combinedData = {}
-    
-    if 'errors' in data:
+    if 'errors' in seedData or 'errors' in data:
         print('Error:')
+        print(seedData['errors'])
         print(data['errors'])
         return None
-    elif not data['data']['phase']:
+    elif not seedData['data']['phase'] or not data:
         print('Phase not found')
         return None
 
-    seedings = data['data']['phase']['seeds']['nodes']
-    sets = data['data']['phase']['sets']['nodes']
-    
+    seedings = seedData['data']['phase']['seeds']['nodes']
+    sets = data['sets']
     seedsDict = {seed['entrant']['id']: seed for seed in seedings}
 
-    # Repopulate combinedData with sorted sets based on 'completedAt'
     for set in sets:
         setId = set['id']
         roundNum = set['round']
-        completedAt = set.get('completedAt', 0)  # default to 0 if missing
+        completedAt = set.get('completedAt', 0)
 
         combinedData[setId] = {
             'setId': setId,
@@ -153,7 +239,9 @@ def getUpsets():
         setWinner = None
         setLoser = None
         for slot in set['slots']:
-            entrant = slot['entrant']
+            entrant = slot.get('entrant')
+            if not entrant:
+                continue
             if entrant:
                 entrantId = entrant['id']
                 seedInfo = seedsDict.get(entrantId, {})
@@ -174,7 +262,7 @@ def getUpsets():
         combinedData[setId]['winner'] = setWinner
         combinedData[setId]['loser'] = setLoser
 
-    # Sort the sets by 'completedAt' in descending order
+
     sorted_sets = sorted(combinedData.items(), key=lambda x: x[1].get('completedAt', 0)or 0, reverse=True)
     
     for setId, setInfo in sorted_sets:
@@ -187,25 +275,29 @@ def getUpsets():
                     isWinners = isWinnersSide(setInfo['round'])
                     if winnerSeed > loserSeed:
                         message = (f"{isWinners}{setInfo['winner']['entrantName']} (Seed {winnerSeed}) {setInfo['winner']['stats']['score']['value']} - {setInfo['loser']['stats']['score']['value']} {setInfo['loser']['entrantName']} (Seed {loserSeed}). Upset Factor: {UF}")
-                        return message
+                        return message, setInfo['setId']
     return None
 
-lastUpset = None
+sentUpsets = set()
 async def monitorUpsets(channel):
-    global lastUpset
+    global sentUpsets
     while True:
-        message = getUpsets()
-        if message and message != lastUpset:
+        message = getUpsets()[0]
+        setId = getUpsets()[1]
+        if setId in sentUpsets:
+            return
+        else:
+            sentUpsets.add(setId)
             await channel.send(message)
-            lastUpset = message
         await asyncio.sleep(10)
+
 
 @client.event
 async def on_ready():
     for guild in client.guilds:
         if guild.name == GUILD:
             break
-    channel = client.get_channel(1253590577598038029)
+    channel = client.get_channel(CHANNEL)
     
     if channel:
         client.loop.create_task(monitorUpsets(channel))
