@@ -3,7 +3,7 @@ import discord
 import requests
 import asyncio
 import aiohttp
-import random
+# import random
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -38,6 +38,11 @@ SPR_DICT = {
     **{i: 9 for i in range(25, 33)},
     **{i: 10 for i in range(33, 49)},
     **{i: 11 for i in range(49, 65)},
+    **{i: 12 for i in range(65, 97)},
+    **{i: 13 for i in range(97, 129)},
+    **{i: 14 for i in range(129, 193)},
+    **{i: 15 for i in range(193, 257)},
+    **{i: 16 for i in range(257, 385)}
 }
 
 # GraphQL Queries
@@ -195,10 +200,14 @@ async def get_upsets(session, init_phase_id, phase_ids):
 
     seeds_dict = {seed["entrant"]["id"]: seed for seed in seed_data["data"]["phase"]["seeds"]["nodes"]}
     sorted_sets = sorted(phase_data, key=lambda x: x.get("completedAt", 0) or 0, reverse=True)
+    dq_message = None
 
     for match in sorted_sets:
         if not match.get("slots"):
             continue
+
+        if "preview" in str(match.get("id", "")): 
+          continue
 
         loser_placement = match.get("lPlacement", "Unknown")
         winner, loser = None, None
@@ -217,6 +226,10 @@ async def get_upsets(session, init_phase_id, phase_ids):
             stats = standing.get("stats") or {}
             score = (stats.get("score") or {}).get("value", "N/A")
 
+            if score == -1:
+                dq_message = f"🔴 DQ: {entrant['name']} (Seed {seed_num})"
+                return dq_message, None, entrant_id
+
             if placement == 1:
                 winner = (entrant["name"], seed_num, score)
             elif placement == 2:
@@ -231,23 +244,30 @@ async def get_upsets(session, init_phase_id, phase_ids):
                 message = f"{is_winners_side(match['round'])}{winner_name} (Seed {winner_seed}) {winner_score} - {loser_score} {loser_name} (Seed {loser_seed}). Upset Factor: {upset_factor}."
                 if message[2] == "L":
                     message += f" Out at {loser_placement}{placement_suffix(loser_placement)}"
-                return message, match["id"]
+                return message, match["id"], None
 
     return None
 
 async def monitor_upsets(channel):
-    """Continuously check for upsets and send messages to Discord."""
+    """Continuously check for upsets and DQs, ensuring no duplicate messages are sent."""
     sent_upsets = set()
+    sent_dqs = set()
+
     async with aiohttp.ClientSession() as session:
         while True:
             upset_message = await get_upsets(session, init_phase_id, phase_ids)
+
             if upset_message:
-                message, set_id = upset_message
-                if set_id not in sent_upsets:
+                message, set_id, player_id = upset_message
+                
+                if set_id is None and player_id not in sent_dqs:
+                    sent_dqs.add(player_id)
+                    await channel.send(message)
+                elif set_id not in sent_upsets and set_id is not None:
                     sent_upsets.add(set_id)
                     await channel.send(message)
-            await asyncio.sleep(10)
 
+            await asyncio.sleep(3)
 # Initialize Discord bot
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
