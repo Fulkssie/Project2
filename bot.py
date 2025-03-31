@@ -120,7 +120,6 @@ query Phase($phaseId: ID!, $page: Int!, $perPage: Int!) {
 }
 '''
 
-
 def fetch_event_id():
     """Fetch the event ID from Start.gg API."""
     response = requests.post(URL, headers=HEADERS, json={"query": QUERY_EVENT_ID, "variables": {"slug": SLUG}})
@@ -144,33 +143,96 @@ def fetch_event_data(event_id):
     phases = data.get("data", {}).get("event", {}).get("phases", [])
     return [phase["id"] for phase in sorted(phases, key=lambda x: x["phaseOrder"])]
 
+# Cache for storing fetched seeds
+SEED_CACHE = {}
 
 async def fetch_init_phase_data(session, phase_id):
-    """Fetch initial phase data (seed information)."""
-    async with session.post(
-        URL, headers=HEADERS, json={"query": QUERY_INIT_PHASE, "variables": {"phaseId": phase_id, "page": 1, "perPage": PER_PAGE}}
-    ) as response:
-        return await response.json() if response.status == 200 else None
+    """Fetch initial phase data (seed information) with caching."""
+    if phase_id in SEED_CACHE:
+        return SEED_CACHE[phase_id]
 
+    all_seeds = []
+    page = 1
+    retry_delay = 2
+
+    while True:
+        try:
+            async with session.post(
+                URL, headers=HEADERS, json={"query": QUERY_INIT_PHASE, "variables": {"phaseId": phase_id, "page": page, "perPage": PER_PAGE}}
+            ) as response:
+                if response.status == 429:
+                    print(f"Rate limit hit. Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+
+                if response.status != 200:
+                    print(f"Error fetching phase data (Phase {phase_id}, Page {page}): {response.status}")
+                    print(await response.text())
+                    break
+
+                data = await response.json()
+                seeds = data.get("data", {}).get("phase", {}).get("seeds", {}).get("nodes", [])
+
+                if not seeds:
+                    break
+
+                all_seeds.extend(seeds)
+                page += 1
+                retry_delay = 2
+
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            break
+
+    SEED_CACHE[phase_id] = {"data": {"phase": {"seeds": {"nodes": all_seeds}}}}
+    print(f"Total seeds retrieved: {len(all_seeds)} (cached for future requests)")
+    return SEED_CACHE[phase_id]
 
 async def fetch_phase_data(session, phase_ids):
-    """Fetch tournament sets data for all phases."""
+    """Fetch tournament sets data for all phases with rate limiting."""
     all_sets = []
-    for phase_id in phase_ids:
-        async with session.post(
-            URL, headers=HEADERS, json={"query": QUERY_PHASES, "variables": {"phaseId": phase_id, "page": 1, "perPage": PER_PAGE}}
-        ) as response:
-            if response.status == 200:
-                data = await response.json()
-                if "errors" not in data and data.get("data", {}).get("phase"):
-                    all_sets.extend(data["data"]["phase"]["sets"]["nodes"])
-    return all_sets
 
+    for phase_id in phase_ids:
+        page = 1
+        retry_delay = 2
+
+        while True:
+            try:
+                async with session.post(
+                    URL, headers=HEADERS, json={"query": QUERY_PHASES, "variables": {"phaseId": phase_id, "page": page, "perPage": PER_PAGE}}
+                ) as response:
+                    if response.status == 429:
+                        print(f"Rate limit hit for sets. Retrying in {retry_delay} seconds...")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2
+                        continue
+
+                    if response.status != 200:
+                        print(f"Error fetching sets data (Phase {phase_id}, Page {page}): {response.status}")
+                        print(await response.text())
+                        break
+
+                    data = await response.json()
+                    sets = data.get("data", {}).get("phase", {}).get("sets", {}).get("nodes", [])
+
+                    if not sets:
+                        break
+
+                    all_sets.extend(sets)
+                    page += 1
+                    retry_delay = 2
+
+            except Exception as e:
+                print(f"Unexpected error: {e}")
+                break
+
+    print(f"Total sets retrieved: {len(all_sets)}")
+    return all_sets
 
 def calc_spr(seed_num):
     """Calculate Seed Placement Rank (SPR)."""
     return SPR_DICT.get(seed_num, seed_num)
-
 
 def is_winners_side(round_num):
     """Determine if a match is from Winners or Losers bracket."""
@@ -187,7 +249,6 @@ def placement_suffix(placement):
     if 11 <= placement <= 13:
         return "th"
     return {1: "st", 2: "nd", 3: "rd"}.get(placement % 10, "th")
-
 
 async def get_upsets(session, init_phase_id, phase_ids):
     """Fetch and process upset data."""
@@ -240,7 +301,7 @@ async def get_upsets(session, init_phase_id, phase_ids):
             loser_name, loser_seed, loser_score = loser
             upset_factor = calc_upset_factor(winner_seed, loser_seed)
 
-            if winner_seed > loser_seed:
+            if upset_factor > 0:
                 message = f"{is_winners_side(match['round'])}{winner_name} (Seed {winner_seed}) {winner_score} - {loser_score} {loser_name} (Seed {loser_seed}). Upset Factor: {upset_factor}."
                 if message[2] == "L":
                     message += f" Out at {loser_placement}{placement_suffix(loser_placement)}"
@@ -265,6 +326,7 @@ async def monitor_upsets(channel):
                     await channel.send(message)
                 elif set_id not in sent_upsets and set_id is not None:
                     sent_upsets.add(set_id)
+                    print(sent_upsets)
                     await channel.send(message)
 
             await asyncio.sleep(3)
@@ -290,8 +352,10 @@ async def on_ready():
 
 @client.event
 async def on_disconnect():
-    """Ensure the session is closed when the bot disconnects."""
-    await client.session.close()
+    print("Bot disconnected!")
+    if hasattr(client, 'session') and not client.session.closed:
+        await client.session.close()
+        print("Session closed.")
 
 '''
 @client.event
