@@ -85,7 +85,7 @@ async def sets_loser(interaction: discord.Interaction, loser: str):
 @bot.tree.command(name="sets-tournament", description="Get all sets from a tournament")
 async def sets_tournament(interaction: discord.Interaction, tournament:str):
     response = requests.get(f"{URL}/sets/tournament/{tournament}")
-    if response != 200:
+    if response.status_code != 200:
         await interaction.response.send_message("Sets not found")
         return
     
