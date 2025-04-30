@@ -3,26 +3,17 @@ This is a full-stack application for tracking competitive match upsets in tourna
 
 ## Features
 ### FastAPI Backend
-Store match data (winner, loser, scores, seeds, tournament).
+- Store match data (winner, loser, scores, seeds, tournament).
+- Calculate and return Upset Factor based on a Seed Placement Rank (SPR) model.
+- Create, read, update, delete sets
+- Query sets by winner, loser, or tournament.
 
-Calculate and return Upset Factor based on a Seed Placement Rank (SPR) model.
-
-RESTful API endpoints to:
-
-Create, read, update, delete sets
-
-Query sets by winner, loser, or tournament.
-
-🤖 Discord Bot
-Slash commands for:
-
-Getting a set by ID
-
-Listing sets by winner, loser, or tournament
-
-Adding, deleting, and updating sets
-
-Fetches data directly from the FastAPI backend.
+### Discord Bot
+- Slash commands for:
+  - Getting a set by ID
+  - Listing sets by winner, loser, or tournament
+  - Adding, deleting, and updating sets
+- Fetches data directly from the FastAPI backend.
 
 🔧 Setup Instructions
 1. Clone the Repository
