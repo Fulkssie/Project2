@@ -1,8 +1,8 @@
 # Tournament Upset Tracker
 This is a full-stack application for tracking competitive match upsets in tournaments using a FastAPI backend and a Discord bot frontend. The backend manages set data and calculates upset factors based on player seeds, while the bot allows users to interact with this data directly from Discord using slash commands.
 
-📦 Features
-🧠 FastAPI Backend
+## Features
+# FastAPI Backend
 Store match data (winner, loser, scores, seeds, tournament).
 
 Calculate and return Upset Factor based on a Seed Placement Rank (SPR) model.
