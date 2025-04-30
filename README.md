@@ -16,21 +16,17 @@ This is a full-stack application for tracking competitive match upsets in tourna
 - Fetches data directly from the FastAPI backend.
 
 ## File Structure
-main.py: FastAPI app with endpoints
-
-dbModels.py: SQLAlchemy models (must include Upset and Base)
-
-apiModels.py: Pydantic schema (SetModel)
-
-upsets.db: SQLite DB file (auto-created)
-
-bot.py: Discord client that used the API to pull from the database
+- main.py: FastAPI app with endpoints
+- dbModels.py: SQLAlchemy models (must include Upset and Base)
+- apiModels.py: Pydantic schema (SetModel)
+- upsets.db: SQLite DB file (auto-created)
+- bot.py: Discord client that used the API to pull from the database
 
 ## Upset Factor Calculation
 The Upset Factor is calculated by mapping each seed to a Seed Placement Rank (SPR). A larger difference between the SPR of the winner and the loser indicates a bigger upset.
 SPR - the number of upsets a certain seed needs to win to get 1st place
 
-Example logic:
+### Example logic:
 
 Seed 1 → SPR 0
 
